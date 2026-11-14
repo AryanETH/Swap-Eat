@@ -27,9 +27,10 @@ const modeText={Share:'Free',Swap:'Swap',Deal:'Deal'};
 const dialog=$('dialog');
 const fmt=new Intl.DateTimeFormat('en-IN',{dateStyle:'medium',timeStyle:'short'});
 const date=(value)=>fmt.format(new Date(value));
-const labels={pending:'Pending',accepted:'Accepted',declined:'Declined',cancelled:'Cancelled',available:'Available',reserved:'Reserved',removed:'Withdrawn'};
+const labels={pending:'Pending',accepted:'Accepted',declined:'Declined',cancelled:'Cancelled',available:'Available',reserved:'Already requested',expired:'Expired',removed:'Withdrawn'};
 let listings=[], requests=[], user=null, view='', area='All Bhopal', category='All', search='', sort='new', requestTab='sent', toastTimer, afterSignIn=null;
 const bhopal={lat:23.2599,lng:77.4126};
+let profile=null;
 let position, watchId, marketMap, mapPins, radius, userMarker, showMap=false, picker, pickupPin;
 function locate(){
   if(watchId!==undefined)return;
@@ -61,7 +62,8 @@ function rowTitle(title,count=''){
   return '<div class="section-head"><h1>'+title+'</h1>'+count+'</div>';
 }
 function tabs(){
-  const tabHtml=nav.map(([route,label,name])=>'<button data-route="'+route+'"'+(view===route?' aria-current="page"':'')+'>'+icon(name)+label+'</button>').join('');
+  const pending=requests.filter(r=>r.owner===user?.uid && r.status==='pending' && available(find(r.listing))).length;
+  const tabHtml=nav.map(([route,label,name])=>'<button data-route="'+route+'"'+(view===route?' aria-current="page"':'')+'>'+icon(name)+label+(route==='requests'&&pending?' ('+pending+')':'')+'</button>').join('');
   $('desktop').innerHTML=tabHtml;
   $('bottom').innerHTML=tabHtml+'<button data-action="post">'+icon('plus')+'List food</button>';
   $('location').innerHTML=icon('pin')+escape(area==='All Bhopal'?'Bhopal':area)+icon('chevron');
@@ -79,7 +81,7 @@ function explore(){
   results();
 }
 function results(){
-  let items=listings.filter(item=>available(item)
+  let items=listings.filter(item=>Date.parse(item.pickup)>Date.now() && ['available','reserved'].includes(item.status)
     && (!position || (item.location && distance(position,item.location)<=5))
     && (area==='All Bhopal'||area===item.area)
     && (category==='All'||category===item.category||category===item.mode)
@@ -95,7 +97,7 @@ function results(){
   $('chips').innerHTML=['All',...categories,...modes].map(x=>'<button class="chip" data-filter="'+x+'" aria-pressed="'+(category===x)+'">'+x+'</button>').join('');
   $('count').textContent=items.length+' '+(items.length===1?'listing':'listings');
   $('results').innerHTML=items.length?'<div class="grid">'+items.map(item=>
-    '<article class="card"><button class="card-open" data-item="'+escape(item.id)+'">'+media(item)+'<div class="card-body"><h3>'+escape(item.title)+'</h3><span class="line">'+icon('pin')+escape(item.area)+' · '+escape(item.providerName||item.provider)+(position&&item.location?' · '+distance(position,item.location).toFixed(1)+' km':'')+'</span><div class="card-bottom"><span class="line">'+icon('time')+shortTime(item.pickup)+'</span><span class="price">'+money(item)+'</span></div></div></button></article>'
+    '<article class="card"><button class="card-open" data-item="'+escape(item.id)+'">'+media(item)+'<div class="card-body"><h3>'+escape(item.title)+'</h3><span class="line">'+icon('pin')+escape(item.area)+' · '+escape(item.providerName||item.provider)+(position&&item.location?' · '+distance(position,item.location).toFixed(1)+' km':'')+'</span><div class="card-bottom"><span class="line">'+icon('time')+shortTime(item.pickup)+'</span><span class="price">'+(item.status==='reserved'?'Already requested':money(item))+'</span></div></div></button></article>'
   ).join('')+'</div>':'<div class="empty">No available food matches your filters.</div>';
   for(const item of items){
     if(!item.photoCount)continue;
@@ -121,7 +123,7 @@ function renderMap(items,element){
     }else{radius.setLatLng(point);userMarker.setLatLng(point);}
   }else if(radius){radius.remove();userMarker.remove();radius=null;}
   if(marketMap.getPopup && marketMap.getPopup())return;
-  const signature=items.filter(i=>i.location).map(i=>i.id).join(',');
+  const signature=items.filter(i=>i.location).map(i=>i.id+':'+i.status).join(',');
   if(mapPins.signature===signature)return;
   mapPins.signature=signature;
   mapPins.clearLayers();
@@ -165,15 +167,24 @@ function myRequests(){
     const closed=r.status==='pending' && !available(listing);
     const status=closed?'Unavailable':labels[r.status];
     const id=escape(r.id);
-    return '<div class="row"><div><strong>'+escape(r.title)+'</strong><p class="muted">'+date(r.pickup)+'</p>'+(r.message?'<p>'+escape(r.message)+'</p>':'')+(r.pickupNote?'<p><strong>Pickup</strong> '+escape(r.pickupNote)+'</p>':'')+'</div><div class="actions"><span class="badge">'+status+'</span>'+
-    (r.status==='pending'?(received?(!closed?'<button class="primary" data-accept="'+id+'">Accept</button>':'')+'<button class="secondary" data-response="declined" data-id="'+id+'">Decline</button>':'<button class="secondary" data-response="cancelled" data-id="'+id+'">Cancel</button>'):'')+'</div></div>';
+    return '<div class="row"><div><strong>'+escape(r.title)+'</strong><p class="muted">'+date(r.pickup)+'</p>'+(r.message?'<p>'+escape(r.message)+'</p>':'')+(r.pickupNote?'<p><strong>Pickup</strong> '+escape(r.pickupNote)+'</p>':'')+(r.status==='accepted'?'<p class="match-phone" data-request-phone="'+escape(r.id)+'">Loading contact…</p>':'')+'</div><div class="actions"><span class="badge">'+status+'</span>'+
+    (r.status==='accepted' && received?'<button class="secondary" data-release="'+id+'">Reopen listing</button>':'')+(r.status==='pending'?(received?(!closed?'<button class="primary" data-accept="'+id+'">Accept</button>':'')+'<button class="secondary" data-response="declined" data-id="'+id+'">Decline</button>':'<button class="secondary" data-response="cancelled" data-id="'+id+'">Cancel</button>'):'')+'</div></div>';
   }).join(''):'<div class="empty">No '+requestTab+' requests.</div>'));
+}
+function loadMatchedPhones(){
+  document.querySelectorAll('[data-request-phone]').forEach(node=>{
+    const item=requests.find(r=>r.id===node.dataset.requestPhone);
+    if(!item)return;
+    data.matchedPhone(item).then(phone=>{
+      if(node.isConnected)node.textContent=phone?'Contact: '+phone:'Contact unavailable';
+    }).catch(()=>{if(node.isConnected)node.textContent='Contact unavailable';});
+  });
 }
 function render(){
   tabs();
   if(view==='explore'){if($('results')) results();else explore();}
   else if(view==='listings') myListings();
-  else myRequests();
+  else {myRequests();loadMatchedPhones();}
 }
 function navigate(){
   const route=location.hash.slice(1);
@@ -183,6 +194,7 @@ function navigate(){
 }
 function go(route){if(location.hash==='#'+route) navigate();else location.hash=route;}
 function modal(title,html){
+  dialog.classList.toggle('listing-dialog',title==='List food');
   picker?.remove();
   picker=null;
   $('modal').innerHTML='<div class="modal-head"><h2>'+escape(title)+'</h2><button class="close" data-action="close" aria-label="Close">×</button></div>'+html;
@@ -191,6 +203,8 @@ function modal(title,html){
 function form(title,fields,submit,fn,extra=''){
   modal(title,'<form class="stack">'+fields+'<p class="error" role="alert"></p><button class="primary" type="submit">'+submit+'</button>'+extra+'</form>');
   const node=$('modal').querySelector('form');
+  node.classList.toggle('listing-form',title==='List food');
+  dialog.classList.toggle('listing-dialog',title==='List food');
   node.onsubmit=async e=>{
     e.preventDefault();
     const button=node.querySelector('button[type=submit]');
@@ -204,10 +218,10 @@ function form(title,fields,submit,fn,extra=''){
 function account(mode='signin'){
   if(data.isDemo){modal('Demo mode','<p class="muted">You can try listings and pickup requests here. Demo activity stays in this browser.</p>');return;}
   if(user){
-    form('Profile','<label>Name<input name="name" maxlength="60" required value="'+escape(user.displayName||'')+'"></label><label>Email<input value="'+escape(user.email)+'" readonly></label>','Save profile',async({name})=>{
+    form('Profile','<label>Phone number<input name="phone" type="tel" required value="'+escape(profile?.phone||'')+'"></label><label>Name<input name="name" maxlength="60" required value="'+escape(user.displayName||'')+'"></label><label>Email<input value="'+escape(user.email)+'" readonly></label>','Save profile',async({name,phone})=>{
       name=name.trim();
       if(!name)throw new Error('Enter your name.');
-      await data.updateName(name);dialog.close();toast('Profile updated');
+      await data.saveProfile(name,phone);profile={name,phone};dialog.close();toast('Profile updated');
     },'<a class="secondary support-link" href="mailto:swapeatmail@gmail.com">Contact support</a><button type="button" class="secondary" data-action="logout">Sign out</button>');
     return;
   }
@@ -231,18 +245,19 @@ function account(mode='signin'){
 }
 function post(){
   if(!user){afterSignIn=post;account();return;}
+  if(!data.isDemo&&!profile?.phone){toast('Add your phone number in your profile first.');account();return;}
   pickupPin=null;
-  form('List food','<label>Food name<input name="title" required maxlength="70" placeholder="e.g. Vegetable biryani" list="foodSuggestions"></label><datalist id="foodSuggestions">'+foodNames.map(name=>'<option value="'+escape(name)+'"></option>').join('')+'</datalist>'+
+  form('List food','<div class="listing-fields"><label>Food name<input name="title" required maxlength="70" placeholder="e.g. Vegetable biryani" list="foodSuggestions"></label><datalist id="foodSuggestions">'+foodNames.map(name=>'<option value="'+escape(name)+'"></option>').join('')+'</datalist>'+
   '<div class="pair"><label>Category<select name="category">'+options(categories)+'</select></label><label>Offer<select name="mode"><option value="Share">Free share</option><option value="Swap">Swap</option><option value="Deal">Paid deal</option></select></label></div>'+
   '<div class="pair"><label>Neighbourhood<select name="area">'+options(areas,area)+'</select></label><label>Provider<select name="provider">'+options(['Community','Kitchen','Restaurant','Café','Store'])+'</select></label></div>'+
-  '<div class="pair"><label>Servings<input type="number" name="servings" required min="1" max="100" step="1" value="1"></label><label>Price in ₹<input type="number" inputmode="decimal" name="price" min="0" max="10000" step="0.01" value="0"></label></div>'+
+  '<div class="pair"><label>Quantity<input type="number" name="servings" required min="0.01" max="10000" step="0.01" value="1"></label><label>Unit<select name="unit"><option>servings</option><option>pieces</option><option>kg</option><option>g</option><option>litres</option><option>ml</option></select></label><label>Price in ₹<input type="number" inputmode="decimal" name="price" min="0" max="10000" step="0.01" value="0"></label></div>'+
   '<label>Pickup deadline<input type="datetime-local" name="pickup" required></label>'+
   '<label>Photos (up to 3)<input id="photos" type="file" accept="image/*" multiple></label><div id="photoList" class="muted" aria-live="polite"></div>'+
-  '<label>Public pickup point <span class="muted">Tap the map to place a pin.</span></label><div id="pickupMap" class="map picker" aria-label="Pick a public pickup point"></div><button type="button" class="secondary" data-action="pickup-location">Use my current location</button><div id="pinStatus" class="muted" role="status">No pickup pin selected.</div>'+
-  '<label>Ingredients and allergens<textarea name="ingredients" maxlength="400" required rows="2" placeholder="List ingredients and known allergens"></textarea></label>',
+  '</div><div class="listing-location"><label>Public pickup point <span class="muted">Tap the map to place a pin.</span></label><div id="pickupMap" class="map picker" aria-label="Pick a public pickup point"></div><button type="button" class="secondary" data-action="pickup-location">Use my current location</button><div id="pinStatus" class="muted" role="status">No pickup pin selected.</div>'+
+  '<label>Ingredients and allergens<textarea name="ingredients" maxlength="400" rows="2" placeholder="List ingredients and known allergens"></textarea></label></div>',
   'Publish listing',async values=>{
     const pickup=new Date(values.pickup);
-    if(!values.title.trim() || !values.ingredients.trim()) throw new Error('Enter a food name and ingredients.');
+    if(!values.title.trim()) throw new Error('Enter a food name.');
     if(!Number.isFinite(pickup.getTime())||pickup.getTime()<=Date.now()) throw new Error('Choose a future pickup deadline.');
     if(!pickupPin)throw new Error('Select a public pickup point on the map.');
     const price=Number(values.price||0);
@@ -283,9 +298,9 @@ function details(item){
   if(!item)return;
   const requested=requests.some(r=>r.listing===item.id && r.buyer===user?.uid);
   const call=available(item)&&item.owner!==user?.uid
-    ? requested?'<span class="badge">Request sent</span>':'<button class="primary" data-request="'+escape(item.id)+'">'+(item.mode==='Swap'?'Offer a swap':'Request pickup')+'</button>'
+    ? requested?'<span class="badge">Request sent</span>':'<button class="primary" data-request="'+escape(item.id)+'">'+(item.mode==='Swap'?'Offer a swap':'Request food')+'</button>'
     : '<span class="badge">'+(available(item)?'Your listing':'Unavailable')+'</span>';
-  modal(item.title,media(item,'modal-photo')+'<div id="listingPhotos" class="photo-gallery"></div><div class="stack"><div class="line">'+icon('pin')+escape(item.area)+' · '+escape(item.providerName||item.provider)+(item.providerName?' · '+escape(item.provider):'')+'</div><div class="line">'+icon('time')+'Pickup by '+date(item.pickup)+'</div><div class="line">'+icon('food')+item.servings+' '+(item.servings===1?'serving':'servings')+' · '+money(item)+'</div><div><strong>Ingredients and allergens</strong><p class="detail">'+escape(item.ingredients)+'</p></div>'+call+'</div>');
+  modal(item.title,media(item,'modal-photo')+'<div id="listingPhotos" class="photo-gallery"></div><div class="stack"><div class="line">'+icon('pin')+escape(item.area)+' · '+escape(item.providerName||item.provider)+(item.providerName?' · '+escape(item.provider):'')+'</div><div class="line">'+icon('time')+'Pickup by '+date(item.pickup)+'</div><div class="line">'+icon('food')+item.servings+' '+escape(item.unit||'servings')+' · '+money(item)+'</div><div><strong>Ingredients and allergens</strong><p class="detail">'+escape(item.ingredients)+'</p></div>'+call+'</div>');
   const gallery=$('listingPhotos');
   data.getPhotos(item).then(photos=>{
     if(!gallery.isConnected)return;
@@ -303,10 +318,10 @@ function requestPickup(item){
   if(!item || !available(item))return toast('This listing is no longer available.');
   if(!user){afterSignIn=()=>requestPickup(find(item.id));account();return;}
   const swap=item.mode==='Swap';
-  form(swap?'Offer a swap':'Request pickup','<span class="muted">'+escape(item.title)+' · '+escape(item.area)+'</span><label>'+ (swap?'What can you offer?':'Pickup note (optional)')+'<textarea name="message" rows="3" maxlength="350" '+(swap?'required':'')+'></textarea></label>','Send request',async values=>{
+  form(swap?'Offer a swap':'Request food','<span class="muted">'+escape(item.title)+' · '+escape(item.area)+'</span><label>'+ (swap?'What can you offer?':'Pickup note (optional)')+'<textarea name="message" rows="3" maxlength="350" '+(swap?'required':'')+'></textarea></label>','Send request',async values=>{
     const note=values.message.trim();
     if(swap&&!note)throw new Error('Enter what you can offer in return.');
-    await data.request(item,note);
+    await data.request(item,note,profile?.phone);
     dialog.close();requestTab='sent';go('requests');toast('Request sent');
   });
 }
@@ -314,7 +329,7 @@ function accept(item){
   if(!item)return;
   form('Accept request','<label>Pickup instructions<textarea name="note" rows="3" maxlength="350" required placeholder="Public pickup point and time"></textarea></label>','Accept request',async values=>{
     if(!values.note.trim())throw new Error('Enter pickup instructions.');
-    await data.respond(item,'accepted',values.note.trim());dialog.close();toast('Request accepted');
+    await data.respond(item,'accepted',values.note.trim(),profile?.phone);dialog.close();toast('Request accepted');
   });
 }
 document.addEventListener('click',async e=>{
@@ -324,13 +339,14 @@ document.addEventListener('click',async e=>{
   try{
     if(btn.id==='account') account();
     if(btn.id==='location') form('Choose area','<label>Neighbourhood<select name="area">'+options(['All Bhopal',...areas],area)+'</select></label>','Apply',async values=>{area=values.area;dialog.close();go('explore');render();});
-    if(d.route)go(d.route);
+    if(d.route){if(d.route==='requests' && requests.some(r=>r.owner===user?.uid && r.status==='pending'))requestTab='received';go(d.route);}
     if(d.filter){category=d.filter;results();$('chips').querySelector('[aria-pressed=true]')?.focus();}
-    if(d.tab){requestTab=d.tab;myRequests();}
+    if(d.tab){requestTab=d.tab;myRequests();loadMatchedPhones();}
     if(d.item)details(find(d.item));
     if(d.request)requestPickup(find(d.request));
     if(d.auth)account(d.auth);
     if(d.accept)accept(requests.find(r=>r.id===d.accept));
+    if(d.release){await data.release(requests.find(r=>r.id===d.release));toast('Listing reopened');}
     if(d.withdraw)form('Withdraw listing','<p class="muted">'+escape(find(d.withdraw)?.title)+'</p>','Withdraw listing',async()=>{await data.withdraw(d.withdraw);dialog.close();toast('Listing withdrawn');});
     if(d.response){
       btn.disabled=true;
@@ -374,5 +390,5 @@ document.addEventListener('error',e=>{if(e.target instanceof HTMLImageElement)e.
 document.querySelector('.logo').innerHTML=icon('swap');
 window.addEventListener('hashchange',navigate);
 navigate();
-data.start((l,r)=>{listings=l;requests=r;render();},who=>{user=who;render();},err=>toast(fail(err)));
-setInterval(()=>{if(view==='explore'&&!dialog.open)results();},60000);
+data.start((l,r)=>{listings=l;requests=r;data.expireListings(l);render();},who=>{user=who;profile=null;if(who&&!data.isDemo)data.getProfile().then(p=>{if(user?.uid===who.uid)profile=p;}).catch(err=>toast(fail(err)));render();},err=>toast(fail(err)));
+setInterval(()=>{data.expireListings(listings);if(!dialog.open)render();},15000);
