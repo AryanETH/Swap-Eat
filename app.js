@@ -1,4 +1,5 @@
 import * as data from './data.js';
+import {createMap,distance,encodePhotos} from './nearby.js';
 
 const paths={
   swap:'M4 7h15m-4-4 4 4-4 4M20 17H5m4-4-4 4 4 4',
@@ -27,6 +28,22 @@ const fmt=new Intl.DateTimeFormat('en-IN',{dateStyle:'medium',timeStyle:'short'}
 const date=(value)=>fmt.format(new Date(value));
 const labels={pending:'Pending',accepted:'Accepted',declined:'Declined',cancelled:'Cancelled',available:'Available',reserved:'Reserved',removed:'Withdrawn'};
 let listings=[], requests=[], user=null, view='', area='All Bhopal', category='All', search='', sort='new', requestTab='sent', toastTimer, afterSignIn=null;
+const bhopal={lat:23.2599,lng:77.4126};
+let position, watchId, marketMap, mapPins, radius, userMarker, showMap=false, picker, pickupPin;
+function locate(){
+  if(watchId!==undefined)return;
+  if(!navigator.geolocation){toast('Location is unavailable on this device.');return;}
+  watchId=navigator.geolocation.watchPosition(({coords})=>{
+    const first=!position;
+    position={lat:coords.latitude,lng:coords.longitude};
+    if(first && marketMap)marketMap.setView([position.lat,position.lng],13);
+    render();
+  },()=>{
+    navigator.geolocation.clearWatch(watchId);
+    watchId=undefined;
+    toast('Location could not be read. Check browser permissions.');
+  },{enableHighAccuracy:true,maximumAge:15000,timeout:20000});
+}
 const find=(id)=>listings.find(l=>l.id===id);
 const available=(item)=>item?.status==='available' && Date.parse(item.pickup)>Date.now();
 const money=(item)=>item.mode==='Deal'?'₹'+item.price:modeText[item.mode];
@@ -53,7 +70,7 @@ function explore(){
   $('main').innerHTML='<section class="hero"><div class="hero-image"></div><div class="hero-content"><div class="eyebrow"><span class="dot"></span>Bhopal food exchange</div><h1>Good food.<br><span>Better shared.</span></h1><button class="primary" data-action="post">'+icon('plus')+' List food</button></div></section>'+
   '<section id="market"><div class="section-head"><h2>Find food nearby</h2><span id="count" class="count"></span>'+(data.isDemo?'<button class="chip demo" data-action="demo">Demo mode</button>':'')+'</div>'+
   '<div class="filters"><label class="search">'+icon('search')+'<input type="search" id="search" aria-label="Search listings" placeholder="Search food or area"></label><select id="sort" aria-label="Sort listings"><option value="new">Newest</option><option value="soon">Pickup soon</option><option value="price">Lowest price</option></select></div>'+
-  '<div class="chips" id="chips"></div><div id="results"></div></section>';
+  '<div class="chips"><button class="chip" data-action="nearby">Use my location · 5 km</button><button class="chip" data-action="map" id="mapToggle"></button></div><div id="liveMap" class="map" aria-label="Live food pickup map"></div><div class="chips" id="chips"></div><div id="results"></div></section>';
   $('search').value=search;
   $('search').oninput=e=>{search=e.target.value;results();};
   $('sort').value=sort;
@@ -62,16 +79,50 @@ function explore(){
 }
 function results(){
   let items=listings.filter(item=>available(item)
+    && (!position || (item.location && distance(position,item.location)<=5))
     && (area==='All Bhopal'||area===item.area)
     && (category==='All'||category===item.category||category===item.mode)
     && [item.title,item.area,item.provider,item.ingredients].join(' ').toLowerCase().includes(search.trim().toLowerCase()));
   const comparisons={new:(a,b)=>b.createdAt-a.createdAt,soon:(a,b)=>Date.parse(a.pickup)-Date.parse(b.pickup),price:(a,b)=>a.price-b.price};
   items.sort(comparisons[sort]);
+  const mapEl=$('liveMap');
+  mapEl.hidden=!showMap;
+  $('mapToggle').textContent=showMap?'Hide live map':'Show live map';
+  $('mapToggle').setAttribute('aria-pressed',String(showMap));
+  $('main').querySelector('[data-action=nearby]').textContent=position?'Within 5 km · Live':'Use my location · 5 km';
+  if(showMap && window.L) renderMap(items,mapEl);
   $('chips').innerHTML=['All',...categories,...modes].map(x=>'<button class="chip" data-filter="'+x+'" aria-pressed="'+(category===x)+'">'+x+'</button>').join('');
   $('count').textContent=items.length+' '+(items.length===1?'listing':'listings');
   $('results').innerHTML=items.length?'<div class="grid">'+items.map(item=>
-    '<article class="card"><button class="card-open" data-item="'+escape(item.id)+'">'+media(item)+'<div class="card-body"><h3>'+escape(item.title)+'</h3><span class="line">'+icon('pin')+escape(item.area)+' · '+escape(item.provider)+'</span><div class="card-bottom"><span class="line">'+icon('time')+shortTime(item.pickup)+'</span><span class="price">'+money(item)+'</span></div></div></button></article>'
+    '<article class="card"><button class="card-open" data-item="'+escape(item.id)+'">'+media(item)+'<div class="card-body"><h3>'+escape(item.title)+'</h3><span class="line">'+icon('pin')+escape(item.area)+' · '+escape(item.providerName||item.provider)+(position&&item.location?' · '+distance(position,item.location).toFixed(1)+' km':'')+'</span><div class="card-bottom"><span class="line">'+icon('time')+shortTime(item.pickup)+'</span><span class="price">'+money(item)+'</span></div></div></button></article>'
   ).join('')+'</div>':'<div class="empty">No available food matches your filters.</div>';
+}
+function renderMap(items,element){
+  if(!marketMap){
+    marketMap=createMap(element,position||bhopal,position?13:12);
+    mapPins=L.layerGroup().addTo(marketMap);
+  }
+  marketMap.invalidateSize();
+  const point=position&&[position.lat,position.lng];
+  if(point){
+    if(!radius){
+      radius=L.circle(point,{radius:5000,color:'#356343',weight:1,fillOpacity:.09,interactive:false}).addTo(marketMap);
+      userMarker=L.circleMarker(point,{radius:7,color:'#2869b2',fillOpacity:1,interactive:false}).addTo(marketMap);
+    }else{radius.setLatLng(point);userMarker.setLatLng(point);}
+  }else if(radius){radius.remove();userMarker.remove();radius=null;}
+  if(marketMap.getPopup && marketMap.getPopup())return;
+  const signature=items.filter(i=>i.location).map(i=>i.id).join(',');
+  if(mapPins.signature===signature)return;
+  mapPins.signature=signature;
+  mapPins.clearLayers();
+  for(const item of items.filter(i=>i.location)){
+    const title=escape(item.title);
+    const provider=escape(item.providerName||item.provider);
+    L.marker([item.location.lat,item.location.lng],{title:item.title,alt:item.title})
+      .bindTooltip(title+' · '+provider)
+      .bindPopup('<strong>'+title+'</strong><br>'+provider+' · '+money(item)+'<br><button class="map-listing" data-item="'+escape(item.id)+'">View food</button>')
+      .addTo(mapPins);
+  }
 }
 function shortTime(value){
   const pickup=new Date(value);
@@ -106,11 +157,13 @@ function render(){
 function navigate(){
   const route=location.hash.slice(1);
   const next=nav.some(n=>n[0]===route)?route:'explore';
-  if(next!==view){view=next; $('main').replaceChildren();window.scrollTo(0,0);}
+  if(next!==view){marketMap?.remove();marketMap=null;radius=null;view=next; $('main').replaceChildren();window.scrollTo(0,0);}
   render();
 }
 function go(route){if(location.hash==='#'+route) navigate();else location.hash=route;}
 function modal(title,html){
+  picker?.remove();
+  picker=null;
   $('modal').innerHTML='<div class="modal-head"><h2>'+escape(title)+'</h2><button class="close" data-action="close" aria-label="Close">×</button></div>'+html;
   if(!dialog.open) dialog.showModal();
 }
@@ -129,13 +182,21 @@ function form(title,fields,submit,fn,extra=''){
 }
 function account(mode='signin'){
   if(data.isDemo){modal('Demo mode','<p class="muted">You can try listings and pickup requests here. Demo activity stays in this browser.</p>');return;}
-  if(user){modal('Account','<div class="stack"><div class="detail">'+escape(user.email)+'</div><button class="secondary" data-action="logout">Sign out</button></div>');return;}
+  if(user){
+    form('Profile','<label>Name<input name="name" maxlength="60" required value="'+escape(user.displayName||'')+'"></label><label>Email<input value="'+escape(user.email)+'" readonly></label>','Save profile',async({name})=>{
+      name=name.trim();
+      if(!name)throw new Error('Enter your name.');
+      await data.updateName(name);dialog.close();toast('Profile updated');
+    },'<button type="button" class="secondary" data-action="logout">Sign out</button>');
+    return;
+  }
   const reset=mode==='reset', sign=mode==='signin';
   const title=reset?'Reset password':sign?'Sign in':'Create account';
-  form(title,'<label>Email<input name="email" type="email" autocomplete="email" required></label>'+
+  form(title,(!reset&&!sign?'<label>Name<input name="name" autocomplete="name" maxlength="60" required></label>':'')+'<label>Email<input name="email" type="email" autocomplete="email" required></label>'+
   (reset?'':'<label>Password<input name="password" type="password" autocomplete="'+(sign?'current-password':'new-password')+'" minlength="6" required></label>'),
   reset?'Send reset link':title,async values=>{
-    await data.authenticate(mode,values.email.trim(),values.password);
+    if(mode==='signup'&&!values.name.trim())throw new Error('Enter your name.');
+    await data.authenticate(mode,values.email.trim(),values.password,values.name?.trim());
     if(!reset && afterSignIn){
       const next=afterSignIn;
       afterSignIn=null;
@@ -145,30 +206,48 @@ function account(mode='signin'){
     }
     dialog.close();
     toast(reset?'If this email has an account, a reset link will be sent.':'Signed in');
-  },'<button type="button" class="secondary" data-auth="'+(sign?'signup':'signin')+'">'+(sign?'Create account':'Back to sign in')+'</button>'+(sign?'<button type="button" class="secondary" data-auth="reset">Forgot password?</button>':''));
+  },'<button type="button" class="secondary" data-auth="'+(sign?'signup':'signin')+'">'+(sign?'Create account':'Back to sign in')+'</button>'+(sign?'<button type="button" class="secondary" data-action="google">Continue with Google</button><button type="button" class="secondary" data-auth="reset">Forgot password?</button>':''));
 }
 function post(){
   if(!user){afterSignIn=post;account();return;}
+  pickupPin=null;
   form('List food','<label>Food name<input name="title" required maxlength="70" placeholder="e.g. Vegetable biryani"></label>'+
-  '<div class="pair"><label>Category<select name="category">'+options(categories)+'</select></label><label>Offer<select name="mode">'+options(modes)+'</select></label></div>'+
+  '<div class="pair"><label>Category<select name="category">'+options(categories)+'</select></label><label>Offer<select name="mode"><option value="Share">Free share</option><option value="Swap">Swap</option><option value="Deal">Paid deal</option></select></label></div>'+
   '<div class="pair"><label>Neighbourhood<select name="area">'+options(areas,area)+'</select></label><label>Provider<select name="provider">'+options(['Community','Kitchen','Restaurant','Café','Store'])+'</select></label></div>'+
-  '<div class="pair"><label>Servings<input type="number" name="servings" required min="1" max="100" step="1" value="1"></label><label id="priceField" hidden>Price in ₹<input type="number" name="price" min="1" max="10000" step="1" disabled></label></div>'+
+  '<div class="pair"><label>Servings<input type="number" name="servings" required min="1" max="100" step="1" value="1"></label><label>Price in ₹<input type="number" inputmode="decimal" name="price" min="0" max="10000" step="0.01" value="0"></label></div>'+
   '<label>Pickup deadline<input type="datetime-local" name="pickup" required></label>'+
+  '<label>Photos (up to 3)<input id="photos" type="file" accept="image/*" multiple></label><div id="photoList" class="muted" aria-live="polite"></div>'+
+  '<label>Public pickup point <span class="muted">Tap the map to place a pin.</span></label><div id="pickupMap" class="map picker" aria-label="Pick a public pickup point"></div><button type="button" class="secondary" data-action="pickup-location">Use my current location</button><div id="pinStatus" class="muted" role="status">No pickup pin selected.</div>'+
   '<label>Ingredients and allergens<textarea name="ingredients" maxlength="400" required rows="2" placeholder="List ingredients and known allergens"></textarea></label>',
   'Publish listing',async values=>{
     const pickup=new Date(values.pickup);
     if(!values.title.trim() || !values.ingredients.trim()) throw new Error('Enter a food name and ingredients.');
     if(!Number.isFinite(pickup.getTime())||pickup.getTime()<=Date.now()) throw new Error('Choose a future pickup deadline.');
-    await data.publish({...values,title:values.title.trim(),ingredients:values.ingredients.trim(),servings:Number(values.servings),price:Number(values.price||0), pickup:pickup.toISOString(),pickupAt:pickup.getTime()});
+    if(!pickupPin)throw new Error('Select a public pickup point on the map.');
+    const price=Number(values.price||0);
+    const mode=price>0?'Deal':values.mode;
+    if(mode==='Deal'&&price<=0)throw new Error('Enter a price above ₹0 for this deal.');
+    const photos=await encodePhotos($('photos').files);
+    await data.publish({...values,mode,photos,location:pickupPin,providerName:user.displayName||values.provider,title:values.title.trim(),ingredients:values.ingredients.trim(),servings:Number(values.servings),price, pickup:pickup.toISOString(),pickupAt:pickup.getTime()});
     dialog.close();go('listings');toast('Listing published');
   });
-  const node=$('modal').querySelector('form');
-  node.elements.mode.onchange=()=>{
-    const deal=node.elements.mode.value==='Deal';
-    $('priceField').hidden=!deal;
-    node.elements.price.disabled=!deal;
-    node.elements.price.required=deal;
+  $('photos').onchange=()=>{
+    const input=$('photos');
+    if(input.files.length>3){input.value='';$('photoList').textContent='Choose up to three photos.';return;}
+    $('photoList').textContent=Array.from(input.files,f=>f.name).join(' · ');
   };
+  if(window.L){
+    picker=createMap($('pickupMap'),position||bhopal,position?15:12);
+    picker.on('click',({latlng})=>setPickup(latlng));
+  }else $('pinStatus').textContent='Map did not load. You can still use your current location.';
+}
+let pickupMarker;
+function setPickup({lat,lng}){
+  if(!dialog.open||!$('pinStatus'))return;
+  pickupPin={lat,lng};
+  pickupMarker?.remove();
+  if(picker) pickupMarker=L.marker([lat,lng]).addTo(picker);
+  $('pinStatus').textContent='Pickup point selected.';
 }
 function details(item){
   if(!item)return;
@@ -176,7 +255,19 @@ function details(item){
   const call=available(item)&&item.owner!==user?.uid
     ? requested?'<span class="badge">Request sent</span>':'<button class="primary" data-request="'+escape(item.id)+'">'+(item.mode==='Swap'?'Offer a swap':'Request pickup')+'</button>'
     : '<span class="badge">'+(available(item)?'Your listing':'Unavailable')+'</span>';
-  modal(item.title,media(item,'modal-photo')+'<div class="stack"><div class="line">'+icon('pin')+escape(item.area)+' · '+escape(item.provider)+'</div><div class="line">'+icon('time')+'Pickup by '+date(item.pickup)+'</div><div class="line">'+icon('food')+item.servings+' '+(item.servings===1?'serving':'servings')+' · '+money(item)+'</div><div><strong>Ingredients and allergens</strong><p class="detail">'+escape(item.ingredients)+'</p></div>'+call+'</div>');
+  modal(item.title,media(item,'modal-photo')+'<div id="listingPhotos" class="photo-gallery"></div><div class="stack"><div class="line">'+icon('pin')+escape(item.area)+' · '+escape(item.providerName||item.provider)+(item.providerName?' · '+escape(item.provider):'')+'</div><div class="line">'+icon('time')+'Pickup by '+date(item.pickup)+'</div><div class="line">'+icon('food')+item.servings+' '+(item.servings===1?'serving':'servings')+' · '+money(item)+'</div><div><strong>Ingredients and allergens</strong><p class="detail">'+escape(item.ingredients)+'</p></div>'+call+'</div>');
+  const gallery=$('listingPhotos');
+  data.getPhotos(item).then(photos=>{
+    if(!gallery.isConnected)return;
+    for(const [i,src] of photos.entries()){
+      if(!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(src))continue;
+      const img=new Image();
+      img.src=src;
+      img.alt=item.title+' photo '+(i+1);
+      gallery.append(img);
+    }
+    if(gallery.children.length)gallery.previousElementSibling.hidden=true;
+  }).catch(err=>{if(gallery.isConnected)gallery.textContent=fail(err);});
 }
 function requestPickup(item){
   if(!item || !available(item))return toast('This listing is no longer available.');
@@ -217,6 +308,33 @@ document.addEventListener('click',async e=>{
     }
     if(d.action==='demo'||d.action==='auth')account();
     if(d.action==='post')post();
+    if(d.action==='nearby'){
+      if(position){navigator.geolocation.clearWatch(watchId);watchId=undefined;position=null;results();}
+      else locate();
+    }
+    if(d.action==='map'){
+      if(!window.L){toast('Map is unavailable. Try reloading.');return;}
+      showMap=!showMap;results();
+    }
+    if(d.action==='pickup-location'){
+      if(!navigator.geolocation)throw new Error('Location is unavailable on this device.');
+      navigator.geolocation.getCurrentPosition(({coords})=>{
+        setPickup({lat:coords.latitude,lng:coords.longitude});
+        if(pickupPin)picker?.setView([pickupPin.lat,pickupPin.lng],16);
+      },()=>toast('Location could not be read. Tap the map to choose a pickup point.'),{enableHighAccuracy:true,timeout:15000});
+    }
+    if(d.action==='google'){
+      btn.disabled=true;
+      try{
+        const result=await data.authenticate('google');
+        user=result.user;
+        const next=afterSignIn;
+        afterSignIn=null;
+        if(next)next();else dialog.close();
+        toast('Signed in');
+      }catch(err){$('modal').querySelector('.error').textContent=fail(err);}
+      finally{btn.disabled=false;}
+    }
     if(d.action==='close'){afterSignIn=null;dialog.close();}
     if(d.action==='logout'){await data.logout();dialog.close();toast('Signed out');}
   }catch(err){toast(fail(err));}
