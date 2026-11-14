@@ -14,13 +14,14 @@ service cloud.firestore {
     }
     function validListing(d) {
       return d.keys().hasOnly(['title','category','mode','provider','area','servings',
-          'price','pickup','pickupAt','ingredients','owner','status','createdAt','providerName','location','photoCount']) &&
+          'price','pickup','pickupAt','ingredients','owner','status','createdAt','providerName','location','photoCount','unit']) &&
         d.title is string && d.title.size() > 0 && d.title.size() <= 70 &&
         d.category in ['Meals','Bakery','Produce'] &&
         d.mode in ['Share','Swap','Deal'] &&
         d.provider in ['Community','Kitchen','Restaurant','Café','Store'] &&
         d.area in ['Lalghati','Karond','Gandhi Nagar','Other'] &&
-        d.servings is int && d.servings >= 1 && d.servings <= 100 &&
+        d.servings is number && d.servings >= 0.01 && d.servings <= 10000 &&
+        (!('unit' in d) || d.unit in ['servings','pieces','kg','g','litres','ml']) &&
         d.price is number && (d.mode == 'Deal' ? d.price > 0 && d.price <= 10000 : d.price == 0) &&
         d.providerName is string && d.providerName.size() > 0 && d.providerName.size() <= 60 &&
         d.location.keys().hasOnly(['lat','lng']) &&
@@ -28,8 +29,14 @@ service cloud.firestore {
         d.location.lng is number && d.location.lng >= -180 && d.location.lng <= 180 &&
         d.photoCount is int && d.photoCount >= 0 && d.photoCount <= 3 &&
         d.pickup is string && d.pickup.size() == 24 && d.pickupAt is int &&
-        d.ingredients is string && d.ingredients.size() > 0 && d.ingredients.size() <= 400 &&
+        d.ingredients is string && d.ingredients.size() <= 400 &&
         d.createdAt is int && d.owner == request.auth.uid && active(d);
+    }
+    match /profiles/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid &&
+        (request.method == 'get' || (request.resource.data.keys().hasOnly(['name','phone']) &&
+          request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60 &&
+          request.resource.data.phone is string && request.resource.data.phone.size() >= 7 && request.resource.data.phone.size() <= 20));
     }
     match /listings/{listingId} {
       function photoOk(photo) {
@@ -51,10 +58,17 @@ service cloud.firestore {
       allow create: if signedIn() && validListing(request.resource.data) &&
         (request.resource.data.photoCount == 0 ||
           existsAfter(/databases/$(database)/documents/listings/$(listingId)/media/photos));
+      allow update: if resource.data.status in ['available','reserved'] &&
+        resource.data.pickupAt <= request.time.toMillis() &&
+        request.resource.data.status == 'expired' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
       allow update: if signedIn() && resource.data.owner == request.auth.uid &&
-        resource.data.status == 'available' && (
+        (resource.data.status == 'available' || resource.data.status == 'reserved') && (
           (request.resource.data.status == 'removed' &&
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])) ||
+          (resource.data.status == 'reserved' && resource.data.pickupAt > request.time.toMillis() && request.resource.data.status == 'available' &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','acceptedRequest']) &&
+            getAfter(requestPath(resource.data.acceptedRequest)).data.status == 'declined') ||
           (active(resource.data) && request.resource.data.status == 'reserved' &&
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','acceptedRequest']) &&
             getAfter(requestPath(request.resource.data.acceptedRequest)).data.listing == listingId &&
@@ -71,11 +85,23 @@ service cloud.firestore {
         active(listing);
     }
     match /requests/{id} {
+      match /contacts/{uid} {
+        allow create: if signedIn() && uid == request.auth.uid &&
+          request.resource.data.keys().hasOnly(['phone']) &&
+          request.resource.data.phone is string && request.resource.data.phone.size() >= 7 &&
+          request.resource.data.phone.size() <= 20 &&
+          ((getAfter(requestPath(id)).data.buyer == uid && getAfter(requestPath(id)).data.status == 'pending') ||
+           (getAfter(requestPath(id)).data.owner == uid && getAfter(requestPath(id)).data.status == 'accepted'));
+        allow read: if signedIn() &&
+          get(requestPath(id)).data.status == 'accepted' &&
+          get(listingPath(get(requestPath(id)).data.listing)).data.pickupAt > request.time.toMillis() &&
+          (get(requestPath(id)).data.owner == request.auth.uid || get(requestPath(id)).data.buyer == request.auth.uid);
+      }
       allow read: if signedIn() && (resource.data.owner == request.auth.uid ||
         resource.data.buyer == request.auth.uid);
       allow create: if signedIn() && validRequest(id, request.resource.data,
         get(listingPath(request.resource.data.listing)).data);
-      allow update: if signedIn() && resource.data.status == 'pending' &&
+      allow update: if signedIn() && (resource.data.status == 'pending' || (resource.data.status == 'accepted' && request.auth.uid == resource.data.owner && request.resource.data.status == 'declined')) &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','pickupNote']) &&
         request.resource.data.pickupNote is string && request.resource.data.pickupNote.size() <= 350 && (
           (request.resource.data.status == 'cancelled' && request.auth.uid == resource.data.buyer &&

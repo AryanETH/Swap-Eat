@@ -87,6 +87,16 @@ export async function updateName(name){
   await initialization;
   await A.updateProfile(auth.currentUser,{displayName:name});
 }
+export async function getProfile(){
+  const snapshot=await F.getDoc(ref('profiles',currentUser.uid));
+  return snapshot.exists()?snapshot.data():null;
+}
+export async function saveProfile(name,phone){
+  phone=phone.trim();
+  if(!/^[+0-9 ()-]{7,20}$/.test(phone))throw new Error('Enter a valid phone number.');
+  await F.setDoc(ref('profiles',currentUser.uid),{name,phone});
+  await A.updateProfile(auth.currentUser,{displayName:name});
+}
 export async function logout(){ await initialization; return A.signOut(auth); }
 export function signedInUser(){ return auth?.currentUser; }
 export async function publish(values){
@@ -108,7 +118,7 @@ export async function getPhotos(item){
   const snapshot=await F.getDoc(F.doc(ref('listings',item.id),'media','photos'));
   return snapshot.exists()?snapshot.data().photos:[];
 }
-export async function request(item,message){
+export async function request(item,message,buyerPhone){
   const id=item.id+'_'+currentUser.uid;
   const entry={listing:item.id,title:item.title,owner:item.owner,buyer:currentUser.uid,pickup:item.pickup,message,status:'pending',createdAt:Date.now()};
   if(isDemo){
@@ -124,9 +134,10 @@ export async function request(item,message){
     if(!listingSnap.exists() || listingSnap.data().status!=='available' ||
        Date.parse(listingSnap.data().pickup)<=Date.now()) throw new Error('This listing is no longer available.');
     tx.set(requestRef,entry);
+    tx.set(F.doc(requestRef,'contacts',currentUser.uid),{phone:buyerPhone});
   });
 }
-export async function respond(item,status,pickupNote=''){
+export async function respond(item,status,pickupNote='',ownerPhone=''){
   const update={status,pickupNote};
   if(isDemo){
     if(status==='accepted') cache.listings.find(l=>l.id===item.listing).status='reserved';
@@ -144,6 +155,7 @@ export async function respond(item,status,pickupNote=''){
       if(!listingSnap.exists() || listingSnap.data().status!=='available' ||
          Date.parse(listingSnap.data().pickup)<=Date.now()) throw new Error('This listing is no longer available.');
       tx.update(listingRef,{status:'reserved',acceptedRequest:item.id});
+      tx.set(F.doc(requestRef,'contacts',currentUser.uid),{phone:ownerPhone});
     }
     tx.update(requestRef,update);
   });
@@ -152,4 +164,35 @@ export async function withdraw(id){
   if(!isDemo) return F.updateDoc(ref('listings',id),{status:'removed'});
   cache.listings.find(l=>l.id===id).status='removed';
   demoSave();
+}
+
+export async function release(item){
+  return F.runTransaction(db,async tx=>{
+    const requestRef=ref('requests',item.id);
+    const listingRef=ref('listings',item.listing);
+    const requestSnap=await tx.get(requestRef);
+    const listingSnap=await tx.get(listingRef);
+    if(!requestSnap.exists() || requestSnap.data().status!=='accepted' ||
+       !listingSnap.exists() || listingSnap.data().acceptedRequest!==item.id)
+      throw new Error('This request is already closed.');
+    tx.update(requestRef,{status:'declined',pickupNote:''});
+    tx.update(listingRef,{status:'available',acceptedRequest:F.deleteField()});
+  });
+}
+
+export async function matchedPhone(item){
+  const other=currentUser.uid===item.owner?item.buyer:item.owner;
+  const snapshot=await F.getDoc(F.doc(ref('requests',item.id),'contacts',other));
+  return snapshot.exists()?snapshot.data().phone:'';
+}
+
+const expiring = new Set();
+export function expireListings(items){
+  if(isDemo || !db)return;
+  for(const item of items){
+    if(!['available','reserved'].includes(item.status) || !(item.pickupAt<=Date.now()) || expiring.has(item.id)) continue;
+    expiring.add(item.id);
+    F.updateDoc(ref('listings',item.id),{status:'expired'})
+      .catch(()=>{}).finally(()=>expiring.delete(item.id));
+  }
 }
