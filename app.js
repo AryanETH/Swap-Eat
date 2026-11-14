@@ -118,10 +118,21 @@ function renderMap(items,element){
   for(const item of items.filter(i=>i.location)){
     const title=escape(item.title);
     const provider=escape(item.providerName||item.provider);
-    L.marker([item.location.lat,item.location.lng],{title:item.title,alt:item.title})
+    const marker=L.marker([item.location.lat,item.location.lng],{title:item.title,alt:item.title,
+      icon:L.divIcon({className:'food-map-marker',html:'<span>🍽</span>',iconSize:[52,52],iconAnchor:[26,26]})})
       .bindTooltip(title+' · '+provider)
       .bindPopup('<strong>'+title+'</strong><br>'+provider+' · '+money(item)+'<br><button class="map-listing" data-item="'+escape(item.id)+'">View food</button>')
       .addTo(mapPins);
+    data.getPhotos(item).then(photos=>{
+      const photo=photos[0];
+      if(photo && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(photo)){
+        const image=new Image();
+        image.alt='';
+        image.src=photo;
+        const container=marker.getElement();
+        if(container)container.replaceChildren(image);
+      }
+    }).catch(()=>{});
   }
 }
 function shortTime(value){
@@ -187,7 +198,7 @@ function account(mode='signin'){
       name=name.trim();
       if(!name)throw new Error('Enter your name.');
       await data.updateName(name);dialog.close();toast('Profile updated');
-    },'<button type="button" class="secondary" data-action="logout">Sign out</button>');
+    },'<a class="secondary support-link" href="mailto:swapeatmail@gmail.com">Contact support</a><button type="button" class="secondary" data-action="logout">Sign out</button>');
     return;
   }
   const reset=mode==='reset', sign=mode==='signin';
