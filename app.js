@@ -21,6 +21,7 @@ const escape=(value)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':
 const areas=['Lalghati','Karond','Gandhi Nagar','Other'];
 const categories=['Meals','Bakery','Produce'];
 const modes=['Share','Swap','Deal'];
+const foodNames='Aloo Paratha,Paneer Paratha,Gobi Paratha,Roti,Chapati,Naan,Kulcha,Puri,Bhatura,Thepla,Dosa,Masala Dosa,Idli,Vada,Uttapam,Upma,Poha,Dhokla,Khandvi,Handvo,Pav Bhaji,Vada Pav,Samosa,Kachori, pakora,Aloo Tikki,Chole Bhature,Chole,Rajma,Dal Tadka,Dal Fry,Dal Makhani,Moong Dal,Masoor Dal,Sambar,Rasam,Kadhi,Palak Paneer,Paneer Butter Masala,Shahi Paneer,Kadai Paneer,Matar Paneer,Paneer Tikka,Malai Kofta,Aloo Gobi,Aloo Matar,Bhindi Masala,Baingan Bharta,Dum Aloo,Jeera Aloo,Mixed Vegetable,Vegetable Korma,Chana Masala,Chana Dal,Khichdi,Vegetable Pulao,Jeera Rice,Lemon Rice,Curd Rice,Tamarind Rice,Vegetable Biryani,Chicken Biryani,Egg Biryani,Chicken Curry,Butter Chicken,Tandoori Chicken,Egg Curry,Fish Curry,Mutton Curry,Momos,Noodles,Fried Rice,Manchurian,Spring Roll,Sandwich,Burger,Pizza,Salad,Curd,Raita,Chutney,Achar,Gulab Jamun,Jalebi,Rasgulla,Rasmalai,Kheer,Halwa,Gajar Halwa,Besan Ladoo,Motichoor Ladoo,Barfi,Peda,Milk,Tea,Coffee,Lassi,Buttermilk,Fresh Fruit,Banana,Apple'.split(',').map(x=>x.trim());
 const nav=[['explore','Explore','explore'],['requests','Requests','inbox'],['listings','My listings','bag']];
 const modeText={Share:'Free',Swap:'Swap',Deal:'Deal'};
 const dialog=$('dialog');
@@ -96,6 +97,15 @@ function results(){
   $('results').innerHTML=items.length?'<div class="grid">'+items.map(item=>
     '<article class="card"><button class="card-open" data-item="'+escape(item.id)+'">'+media(item)+'<div class="card-body"><h3>'+escape(item.title)+'</h3><span class="line">'+icon('pin')+escape(item.area)+' · '+escape(item.providerName||item.provider)+(position&&item.location?' · '+distance(position,item.location).toFixed(1)+' km':'')+'</span><div class="card-bottom"><span class="line">'+icon('time')+shortTime(item.pickup)+'</span><span class="price">'+money(item)+'</span></div></div></button></article>'
   ).join('')+'</div>':'<div class="empty">No available food matches your filters.</div>';
+  for(const item of items){
+    if(!item.photoCount)continue;
+    const card=$('results').querySelectorAll('[data-item]');
+    const target=Array.from(card).find(el=>el.dataset.item===item.id)?.querySelector('.media');
+    data.getPhotos(item).then(photos=>{
+      if(!target?.isConnected || !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(photos[0]||''))return;
+      const img=new Image();img.alt='';img.loading='lazy';img.src=photos[0];target.prepend(img);
+    }).catch(()=>{});
+  }
 }
 function renderMap(items,element){
   if(!marketMap){
@@ -217,12 +227,12 @@ function account(mode='signin'){
     }
     dialog.close();
     toast(reset?'If this email has an account, a reset link will be sent.':'Signed in');
-  },'<button type="button" class="secondary" data-auth="'+(sign?'signup':'signin')+'">'+(sign?'Create account':'Back to sign in')+'</button>'+(sign?'<button type="button" class="secondary" data-action="google">Continue with Google</button><button type="button" class="secondary" data-auth="reset">Forgot password?</button>':''));
+  },'<button type="button" class="secondary" data-auth="'+(sign?'signup':'signin')+'">'+(sign?'Create account':'Back to sign in')+'</button>'+(!reset?'<button type="button" class="secondary" data-action="google">Continue with Google</button>':'')+(sign?'<button type="button" class="secondary" data-auth="reset">Forgot password?</button>':''));
 }
 function post(){
   if(!user){afterSignIn=post;account();return;}
   pickupPin=null;
-  form('List food','<label>Food name<input name="title" required maxlength="70" placeholder="e.g. Vegetable biryani"></label>'+
+  form('List food','<label>Food name<input name="title" required maxlength="70" placeholder="e.g. Vegetable biryani" list="foodSuggestions"></label><datalist id="foodSuggestions">'+foodNames.map(name=>'<option value="'+escape(name)+'"></option>').join('')+'</datalist>'+
   '<div class="pair"><label>Category<select name="category">'+options(categories)+'</select></label><label>Offer<select name="mode"><option value="Share">Free share</option><option value="Swap">Swap</option><option value="Deal">Paid deal</option></select></label></div>'+
   '<div class="pair"><label>Neighbourhood<select name="area">'+options(areas,area)+'</select></label><label>Provider<select name="provider">'+options(['Community','Kitchen','Restaurant','Café','Store'])+'</select></label></div>'+
   '<div class="pair"><label>Servings<input type="number" name="servings" required min="1" max="100" step="1" value="1"></label><label>Price in ₹<input type="number" inputmode="decimal" name="price" min="0" max="10000" step="0.01" value="0"></label></div>'+
@@ -242,6 +252,15 @@ function post(){
     await data.publish({...values,mode,photos,location:pickupPin,providerName:user.displayName||values.provider,title:values.title.trim(),ingredients:values.ingredients.trim(),servings:Number(values.servings),price, pickup:pickup.toISOString(),pickupAt:pickup.getTime()});
     dialog.close();go('listings');toast('Listing published');
   });
+  const listingForm=$('modal').querySelector('form');
+  const syncPrice=()=>{
+    const paid=listingForm.elements.mode.value==='Deal';
+    listingForm.elements.price.disabled=!paid;
+    listingForm.elements.price.required=paid;
+    if(!paid)listingForm.elements.price.value='0';
+  };
+  listingForm.elements.mode.addEventListener('change',syncPrice);
+  syncPrice();
   $('photos').onchange=()=>{
     const input=$('photos');
     if(input.files.length>3){input.value='';$('photoList').textContent='Choose up to three photos.';return;}
