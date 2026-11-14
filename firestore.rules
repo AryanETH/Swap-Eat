@@ -14,21 +14,43 @@ service cloud.firestore {
     }
     function validListing(d) {
       return d.keys().hasOnly(['title','category','mode','provider','area','servings',
-          'price','pickup','pickupAt','ingredients','owner','status','createdAt']) &&
+          'price','pickup','pickupAt','ingredients','owner','status','createdAt','providerName','location','photoCount']) &&
         d.title is string && d.title.size() > 0 && d.title.size() <= 70 &&
         d.category in ['Meals','Bakery','Produce'] &&
         d.mode in ['Share','Swap','Deal'] &&
         d.provider in ['Community','Kitchen','Restaurant','Café','Store'] &&
         d.area in ['Lalghati','Karond','Gandhi Nagar','Other'] &&
         d.servings is int && d.servings >= 1 && d.servings <= 100 &&
-        d.price is int && (d.mode == 'Deal' ? d.price >= 1 && d.price <= 10000 : d.price == 0) &&
+        d.price is number && (d.mode == 'Deal' ? d.price > 0 && d.price <= 10000 : d.price == 0) &&
+        d.providerName is string && d.providerName.size() > 0 && d.providerName.size() <= 60 &&
+        d.location.keys().hasOnly(['lat','lng']) &&
+        d.location.lat is number && d.location.lat >= -90 && d.location.lat <= 90 &&
+        d.location.lng is number && d.location.lng >= -180 && d.location.lng <= 180 &&
+        d.photoCount is int && d.photoCount >= 0 && d.photoCount <= 3 &&
         d.pickup is string && d.pickup.size() == 24 && d.pickupAt is int &&
         d.ingredients is string && d.ingredients.size() > 0 && d.ingredients.size() <= 400 &&
         d.createdAt is int && d.owner == request.auth.uid && active(d);
     }
     match /listings/{listingId} {
+      function photoOk(photo) {
+        return photo is string && photo.size() <= 120000 && photo.matches('data:image/jpeg;base64,[A-Za-z0-9+/=]+');
+      }
+      match /media/photos {
+        allow read: if true;
+        allow create: if signedIn() && !exists(listingPath(listingId)) &&
+          getAfter(listingPath(listingId)).data.owner == request.auth.uid &&
+          request.resource.data.keys().hasOnly(['photos']) &&
+          request.resource.data.photos is list &&
+          request.resource.data.photos.size() == getAfter(listingPath(listingId)).data.photoCount &&
+          request.resource.data.photos.size() >= 1 && request.resource.data.photos.size() <= 3 &&
+          photoOk(request.resource.data.photos[0]) &&
+          (request.resource.data.photos.size() < 2 || photoOk(request.resource.data.photos[1])) &&
+          (request.resource.data.photos.size() < 3 || photoOk(request.resource.data.photos[2]));
+      }
       allow read: if true;
-      allow create: if signedIn() && validListing(request.resource.data);
+      allow create: if signedIn() && validListing(request.resource.data) &&
+        (request.resource.data.photoCount == 0 ||
+          existsAfter(/databases/$(database)/documents/listings/$(listingId)/media/photos));
       allow update: if signedIn() && resource.data.owner == request.auth.uid &&
         resource.data.status == 'available' && (
           (request.resource.data.status == 'removed' &&

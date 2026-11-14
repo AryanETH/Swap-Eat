@@ -72,19 +72,41 @@ async function connect(){
     }
   },report);
 }
-export async function authenticate(mode,email,password){
+export async function authenticate(mode,email,password,name){
   await initialization;
   if(mode==='reset') return A.sendPasswordResetEmail(auth,email);
-  if(mode==='signup') return A.createUserWithEmailAndPassword(auth,email,password);
+  if(mode==='google') return A.signInWithPopup(auth,new A.GoogleAuthProvider());
+  if(mode==='signup'){
+    const result=await A.createUserWithEmailAndPassword(auth,email,password);
+    await A.updateProfile(result.user,{displayName:name});
+    return result;
+  }
   return A.signInWithEmailAndPassword(auth,email,password);
+}
+export async function updateName(name){
+  await initialization;
+  await A.updateProfile(auth.currentUser,{displayName:name});
 }
 export async function logout(){ await initialization; return A.signOut(auth); }
 export function signedInUser(){ return auth?.currentUser; }
 export async function publish(values){
-  const entry={...values,owner:currentUser.uid,status:'available',createdAt:Date.now()};
-  if(!isDemo) return F.addDoc(list('listings'),entry);
+  const {photos=[],...details}=values;
+  const entry={...details,photoCount:photos.length,owner:currentUser.uid,status:'available',createdAt:Date.now()};
+  if(!isDemo){
+    const listingRef=F.doc(list('listings'));
+    const batch=F.writeBatch(db);
+    batch.set(listingRef,entry);
+    if(photos.length) batch.set(F.doc(listingRef,'media','photos'),{photos});
+    return batch.commit();
+  }
+  entry.photos=photos;
   cache.listings.unshift({...entry,id:crypto.randomUUID()});
   demoSave();
+}
+export async function getPhotos(item){
+  if(isDemo || !item.photoCount) return item.photos || [];
+  const snapshot=await F.getDoc(F.doc(ref('listings',item.id),'media','photos'));
+  return snapshot.exists()?snapshot.data().photos:[];
 }
 export async function request(item,message){
   const id=item.id+'_'+currentUser.uid;
