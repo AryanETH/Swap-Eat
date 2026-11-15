@@ -84,9 +84,11 @@ function toast(message){clearTimeout(toastTimer);$('toast').textContent=message;
 function fail(e){
   return ({'auth/invalid-credential':'Email or password is incorrect.','auth/email-already-in-use':'An account already uses this email.','auth/weak-password':'Use a password with at least six characters.','auth/network-request-failed':'Connection failed. Try again.','permission-denied':'This action is unavailable or has already been completed.'}[e.code]) || (e.code?'Connection or service error. Try again.':e.message);
 }
+const thumbnailSources=new Map();
 function media(item,extra=''){
   const photo=/^[\d-]+[a-f\d-]*$/i.test(item.photo||'')?'https://images.unsplash.com/photo-'+item.photo+'?auto=format&fit=crop&w=720&q=82':'';
-  return '<div class="media '+extra+'">'+icon('food')+(photo?'<img alt="" loading="lazy" src="'+photo+'">':'')+'<span class="badge">'+escape(item.category)+'</span></div>';
+  const pending=!extra && (photo || item.photoCount);
+  return '<div class="media '+extra+(pending?' thumbnail-loading':'')+'">'+icon('food')+(photo?'<img alt="" loading="lazy" src="'+photo+'">':'')+'<span class="badge">'+escape(item.category)+'</span></div>';
 }
 function rowTitle(title,count=''){
   return '<div class="section-head"><h1>'+title+'</h1>'+count+'</div>';
@@ -154,15 +156,35 @@ function results(){
   $('results').innerHTML=items.length?'<div class="grid">'+items.map(item=>
     '<article class="card"><button class="card-open" data-item="'+escape(item.id)+'">'+media(item)+'<div class="card-body"><h3>'+escape(item.title)+'</h3><span class="line">'+icon('pin')+escape(item.area)+' · '+escape(item.providerName||item.provider)+(position&&item.location?' · '+distance(position,item.location).toFixed(1)+' km':'')+'</span><div class="card-bottom"><span class="line">'+icon('time')+shortTime(item.pickup)+'</span><span class="price">'+(item.status==='reserved'?'Already requested':money(item))+'</span></div></div></button></article>'
   ).join('')+'</div>':'<div class="empty">No available food matches your filters.</div>';
-  for(const item of items){
-    if(!item.photoCount)continue;
-    const card=$('results').querySelectorAll('[data-item]');
-    const target=Array.from(card).find(el=>el.dataset.item===item.id)?.querySelector('.media');
-    data.getPhotos(item).then(photos=>{
-      if(!target?.isConnected || !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(photos[0]||''))return;
-      const img=new Image();img.alt='';img.loading='lazy';img.src=photos[0];target.prepend(img);
-    }).catch(()=>{});
-  }
+  const cards=$('results').querySelectorAll('.card .media');
+  items.forEach((item,index)=>{
+    const target=cards[index];
+    if(!target?.classList.contains('thumbnail-loading'))return;
+    const stop=()=>target.classList.remove('thumbnail-loading');
+    const watch=img=>{
+      img.addEventListener('load',stop,{once:true});
+      img.addEventListener('error',stop,{once:true});
+      if(img.complete && img.getAttribute('src'))stop();
+    };
+    const existing=target.querySelector('img');
+    if(existing){watch(existing);return;}
+    if(!thumbnailSources.has(item.id)){
+      thumbnailSources.set(item.id,data.getPhotos(item).catch(()=>{
+        thumbnailSources.delete(item.id);
+        return [];
+      }));
+    }
+    thumbnailSources.get(item.id).then(photos=>{
+      if(!target.isConnected)return;
+      if(!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(photos[0]||'')){stop();return;}
+      const img=new Image();
+      img.alt='';
+      watch(img);
+      img.src=photos[0];
+      target.prepend(img);
+      if(img.complete)stop();
+    });
+  });
 }
 function renderMap(items,element){
   if(!marketMap){
