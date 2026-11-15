@@ -22,7 +22,7 @@ const areas=['Lalghati','Karond','Gandhi Nagar','Other'];
 const categories=['Meals','Bakery','Produce'];
 const modes=['Share','Swap','Deal'];
 const foodNames='Aloo Paratha,Paneer Paratha,Gobi Paratha,Roti,Chapati,Naan,Kulcha,Puri,Bhatura,Thepla,Dosa,Masala Dosa,Idli,Vada,Uttapam,Upma,Poha,Dhokla,Khandvi,Handvo,Pav Bhaji,Vada Pav,Samosa,Kachori, pakora,Aloo Tikki,Chole Bhature,Chole,Rajma,Dal Tadka,Dal Fry,Dal Makhani,Moong Dal,Masoor Dal,Sambar,Rasam,Kadhi,Palak Paneer,Paneer Butter Masala,Shahi Paneer,Kadai Paneer,Matar Paneer,Paneer Tikka,Malai Kofta,Aloo Gobi,Aloo Matar,Bhindi Masala,Baingan Bharta,Dum Aloo,Jeera Aloo,Mixed Vegetable,Vegetable Korma,Chana Masala,Chana Dal,Khichdi,Vegetable Pulao,Jeera Rice,Lemon Rice,Curd Rice,Tamarind Rice,Vegetable Biryani,Chicken Biryani,Egg Biryani,Chicken Curry,Butter Chicken,Tandoori Chicken,Egg Curry,Fish Curry,Mutton Curry,Momos,Noodles,Fried Rice,Manchurian,Spring Roll,Sandwich,Burger,Pizza,Salad,Curd,Raita,Chutney,Achar,Gulab Jamun,Jalebi,Rasgulla,Rasmalai,Kheer,Halwa,Gajar Halwa,Besan Ladoo,Motichoor Ladoo,Barfi,Peda,Milk,Tea,Coffee,Lassi,Buttermilk,Fresh Fruit,Banana,Apple'.split(',').map(x=>x.trim());
-const nav=[['explore','Explore','explore'],['requests','Requests','inbox'],['listings','My listings','bag']];
+const nav=[['home','Home','food'],['dashboard','Dashboard','explore'],['requests','Requests','inbox'],['listings','My listings','bag']];
 const modeText={Share:'Free',Swap:'Swap',Deal:'Deal'};
 const dialog=$('dialog');
 const fmt=new Intl.DateTimeFormat('en-IN',{dateStyle:'medium',timeStyle:'short'});
@@ -69,7 +69,7 @@ function tabs(){
   $('location').innerHTML=icon('pin')+escape(area==='All Bhopal'?'Bhopal':area)+icon('chevron');
   $('account').innerHTML=icon('user')+' '+(data.isDemo?'Demo':user?'Account':'Sign in');
 }
-function explore(){
+function landing(){
   $('main').innerHTML=`
     <section class="landing-hero" aria-labelledby="landing-title">
       <div class="landing-intro">
@@ -92,10 +92,13 @@ function explore(){
         <li><span class="guide-icon">${icon('inbox')}</span><div><h3>Send a request</h3><p>Choose a free share, swap or deal.</p></div></li>
         <li><span class="guide-icon">${icon('bag')}</span><div><h3>Pick it up</h3><p>Once accepted, check Requests for pickup details.</p></div></li>
       </ol>
-    </section>`+
-  '<section id="market"><div class="section-head"><h2>Find food nearby</h2><span id="count" class="count"></span>'+(data.isDemo?'<button class="chip demo" data-action="demo">Demo mode</button>':'')+'</div>'+
+    </section>
+    <footer class="landing-footer"><strong>Swap Eat</strong><a href="mailto:swapeatmail@gmail.com">Contact support</a></footer>`;
+}
+function dashboard(){
+  $('main').innerHTML='<section id="market"><div class="section-head"><h1>Find food nearby</h1><span id="count" class="count"></span>'+(data.isDemo?'<button class="chip demo" data-action="demo">Demo mode</button>':'')+'</div>'+
   '<div class="filters"><label class="search">'+icon('search')+'<input type="search" id="search" aria-label="Search listings" placeholder="Search food or area"></label><select id="sort" aria-label="Sort listings"><option value="new">Newest</option><option value="soon">Pickup soon</option><option value="price">Lowest price</option></select></div>'+
-  '<div class="chips"><button class="chip" data-action="nearby">Use my location · 5 km</button><button class="chip" data-action="map" id="mapToggle"></button></div><div id="liveMap" class="map" aria-label="Live food pickup map"></div><div class="chips" id="chips"></div><div id="results"></div></section><footer class="landing-footer"><strong>Swap Eat</strong><a href="mailto:swapeatmail@gmail.com">Contact support</a></footer>';
+  '<div class="chips"><button class="chip" data-action="nearby">Use my location · 5 km</button><button class="chip" data-action="map" id="mapToggle"></button></div><div id="liveMap" class="map" aria-label="Live food pickup map"></div><div class="chips" id="chips"></div><div id="results"></div></section>';
   $('search').value=search;
   $('search').oninput=e=>{search=e.target.value;results();};
   $('sort').value=sort;
@@ -211,13 +214,14 @@ function loadMatchedPhones(){
 }
 function render(){
   tabs();
-  if(view==='explore'){if($('results')) results();else explore();}
+  if(view==='home'){if(!$('landing-title'))landing();}
+  else if(view==='dashboard'){if($('results'))results();else dashboard();}
   else if(view==='listings') myListings();
   else {myRequests();loadMatchedPhones();}
 }
 function navigate(){
   const route=location.hash.slice(1);
-  const next=nav.some(n=>n[0]===route)?route:'explore';
+  const next=route==='explore'?'dashboard':nav.some(n=>n[0]===route)?route:'home';
   if(next!==view){marketMap?.remove();marketMap=null;radius=null;view=next; $('main').replaceChildren();window.scrollTo(0,0);}
   render();
 }
@@ -383,10 +387,7 @@ document.addEventListener('click',async e=>{
     }
     if(d.action==='demo'||d.action==='auth')account();
     if(d.action==='post')post();
-    if(d.action==='browse'){
-      $('market').scrollIntoView({block:'start'});
-      $('search').focus({preventScroll:true});
-    }
+    if(d.action==='browse')go('dashboard');
     if(d.action==='nearby'){
       if(position){navigator.geolocation.clearWatch(watchId);watchId=undefined;position=null;results();}
       else locate();
