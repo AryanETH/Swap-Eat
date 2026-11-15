@@ -138,6 +138,12 @@ export async function request(item,message,buyerPhone){
   });
 }
 export async function respond(item,status,pickupNote='',ownerPhone=''){
+  if(status==='accepted'){
+    const random=new Uint32Array(1);
+    do {crypto.getRandomValues(random);} while(random[0]>=4294960000);
+    const code=String(random[0]%10000).padStart(4,'0');
+    pickupNote=pickupNote.slice(0,332)+'\nPickup code: '+code;
+  }
   const update={status,pickupNote};
   if(isDemo){
     if(status==='accepted') cache.listings.find(l=>l.id===item.listing).status='reserved';
