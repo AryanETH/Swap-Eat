@@ -387,7 +387,6 @@ document.addEventListener('click',async e=>{
 });
 dialog.addEventListener('cancel',()=>{afterSignIn=null;});
 document.addEventListener('error',e=>{if(e.target instanceof HTMLImageElement)e.target.remove();},true);
-document.querySelector('.logo').innerHTML=icon('swap');
 window.addEventListener('hashchange',navigate);
 navigate();
 data.start((l,r)=>{listings=l;requests=r;data.expireListings(l);render();},who=>{user=who;profile=null;if(who&&!data.isDemo)data.getProfile().then(p=>{if(user?.uid===who.uid)profile=p;}).catch(err=>toast(fail(err)));render();},err=>toast(fail(err)));
