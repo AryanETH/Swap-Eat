@@ -70,10 +70,32 @@ function tabs(){
   $('account').innerHTML=icon('user')+' '+(data.isDemo?'Demo':user?'Account':'Sign in');
 }
 function explore(){
-  $('main').innerHTML='<section class="hero"><div class="hero-image"></div><div class="hero-content"><div class="eyebrow"><span class="dot"></span>Bhopal food exchange</div><h1>Good food.<br><span>Better shared.</span></h1><button class="primary" data-action="post">'+icon('plus')+' List food</button></div></section>'+
+  $('main').innerHTML=`
+    <section class="landing-hero" aria-labelledby="landing-title">
+      <div class="landing-intro">
+        <p class="landing-place">${icon('pin')} Bhopal’s food-sharing community</p>
+        <h1 id="landing-title">Good food.<br><em>Better shared.</em></h1>
+        <p class="landing-copy">Find free shares, swaps and surplus food deals from neighbours and local businesses.</p>
+        <div class="landing-actions">
+          <button class="primary" data-action="browse">Find food near me ${icon('arrow')}</button>
+          <button class="secondary" data-action="post">${icon('plus')} List food</button>
+        </div>
+      </div>
+      <figure class="landing-photo">
+        <img src="https://images.unsplash.com/photo-1680993032090-1ef7ea9b51e5?auto=format&amp;fit=crop&amp;w=1200&amp;q=82" alt="Indian thali with rice, flatbread and bowls of curry" fetchpriority="high">
+      </figure>
+    </section>
+    <section class="landing-guide" aria-labelledby="guide-title">
+      <h2 id="guide-title">From nearby to your table</h2>
+      <ol>
+        <li><span class="guide-icon">${icon('pin')}</span><div><h3>Find food nearby</h3><p>Browse listings or check the pickup map.</p></div></li>
+        <li><span class="guide-icon">${icon('inbox')}</span><div><h3>Send a request</h3><p>Choose a free share, swap or deal.</p></div></li>
+        <li><span class="guide-icon">${icon('bag')}</span><div><h3>Pick it up</h3><p>Once accepted, check Requests for pickup details.</p></div></li>
+      </ol>
+    </section>`+
   '<section id="market"><div class="section-head"><h2>Find food nearby</h2><span id="count" class="count"></span>'+(data.isDemo?'<button class="chip demo" data-action="demo">Demo mode</button>':'')+'</div>'+
   '<div class="filters"><label class="search">'+icon('search')+'<input type="search" id="search" aria-label="Search listings" placeholder="Search food or area"></label><select id="sort" aria-label="Sort listings"><option value="new">Newest</option><option value="soon">Pickup soon</option><option value="price">Lowest price</option></select></div>'+
-  '<div class="chips"><button class="chip" data-action="nearby">Use my location · 5 km</button><button class="chip" data-action="map" id="mapToggle"></button></div><div id="liveMap" class="map" aria-label="Live food pickup map"></div><div class="chips" id="chips"></div><div id="results"></div></section>';
+  '<div class="chips"><button class="chip" data-action="nearby">Use my location · 5 km</button><button class="chip" data-action="map" id="mapToggle"></button></div><div id="liveMap" class="map" aria-label="Live food pickup map"></div><div class="chips" id="chips"></div><div id="results"></div></section><footer class="landing-footer"><strong>Swap Eat</strong><a href="mailto:swapeatmail@gmail.com">Contact support</a></footer>';
   $('search').value=search;
   $('search').oninput=e=>{search=e.target.value;results();};
   $('sort').value=sort;
@@ -361,6 +383,10 @@ document.addEventListener('click',async e=>{
     }
     if(d.action==='demo'||d.action==='auth')account();
     if(d.action==='post')post();
+    if(d.action==='browse'){
+      $('market').scrollIntoView({block:'start'});
+      $('search').focus({preventScroll:true});
+    }
     if(d.action==='nearby'){
       if(position){navigator.geolocation.clearWatch(watchId);watchId=undefined;position=null;results();}
       else locate();
