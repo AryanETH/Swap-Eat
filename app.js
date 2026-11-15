@@ -1,4 +1,4 @@
-import * as data from './data.js';
+import * as data from './data.js?v=pickup-code';
 import {createMap,distance,encodePhotos} from './nearby.js';
 
 const paths={
@@ -158,6 +158,13 @@ function myListings(){
   $('main').innerHTML=rowTitle('My listings','<button class="primary" data-action="post">+ List food</button>')+
     (!user?noAccount():own.length?own.map(item=>'<div class="row"><div><strong>'+escape(item.title)+'</strong><p class="muted">'+escape(item.area)+' · '+(item.status==='available'&&!available(item)?'Expired':labels[item.status])+'</p></div><div class="actions"><button class="secondary" data-item="'+escape(item.id)+'">View</button>'+(item.status==='available'?'<button class="danger" data-withdraw="'+escape(item.id)+'">Withdraw</button>':'')+'</div></div>').join(''):'<div class="empty">Your published listings will appear here.</div>');
 }
+function pickupDetails(request){
+  if(!request.pickupNote)return '';
+  const match=request.status==='accepted' && request.pickupNote.match(/\nPickup code: ([0-9]{4})$/);
+  const note=match?request.pickupNote.slice(0,match.index):request.pickupNote;
+  return '<p><strong>Pickup</strong> '+escape(note)+'</p>'+
+    (match?'<p><strong>Pickup code</strong> <code>'+match[1]+'</code></p>':'');
+}
 function myRequests(){
   const received=requestTab==='received';
   const items=user?requests.filter(r=>r[received?'owner':'buyer']===user.uid).sort((a,b)=>b.createdAt-a.createdAt):[];
@@ -167,7 +174,7 @@ function myRequests(){
     const closed=r.status==='pending' && !available(listing);
     const status=closed?'Unavailable':labels[r.status];
     const id=escape(r.id);
-    return '<div class="row"><div><strong>'+escape(r.title)+'</strong><p class="muted">'+date(r.pickup)+'</p>'+(r.message?'<p>'+escape(r.message)+'</p>':'')+(r.pickupNote?'<p><strong>Pickup</strong> '+escape(r.pickupNote)+'</p>':'')+(r.status==='accepted'?'<p class="match-phone" data-request-phone="'+escape(r.id)+'">Loading contact…</p>':'')+'</div><div class="actions"><span class="badge">'+status+'</span>'+
+    return '<div class="row"><div><strong>'+escape(r.title)+'</strong><p class="muted">'+date(r.pickup)+'</p>'+(r.message?'<p>'+escape(r.message)+'</p>':'')+pickupDetails(r)+(r.status==='accepted'?'<p class="match-phone" data-request-phone="'+escape(r.id)+'">Loading contact…</p>':'')+'</div><div class="actions"><span class="badge">'+status+'</span>'+
     (r.status==='accepted' && received?'<button class="secondary" data-release="'+id+'">Reopen listing</button>':'')+(r.status==='pending'?(received?(!closed?'<button class="primary" data-accept="'+id+'">Accept</button>':'')+'<button class="secondary" data-response="declined" data-id="'+id+'">Decline</button>':'<button class="secondary" data-response="cancelled" data-id="'+id+'">Cancel</button>'):'')+'</div></div>';
   }).join(''):'<div class="empty">No '+requestTab+' requests.</div>'));
 }
@@ -327,7 +334,7 @@ function requestPickup(item){
 }
 function accept(item){
   if(!item)return;
-  form('Accept request','<label>Pickup instructions<textarea name="note" rows="3" maxlength="350" required placeholder="Public pickup point and time"></textarea></label>','Accept request',async values=>{
+  form('Accept request','<label>Pickup instructions<textarea name="note" rows="3" maxlength="332" required placeholder="Public pickup point and time"></textarea></label>','Accept request',async values=>{
     if(!values.note.trim())throw new Error('Enter pickup instructions.');
     await data.respond(item,'accepted',values.note.trim(),profile?.phone);dialog.close();toast('Request accepted');
   });

@@ -7,16 +7,17 @@
 <title>Swap Eat</title>
 <link rel="icon" type="image/png" href="./swap-eat-logo.png">
 <link rel="apple-touch-icon" href="./swap-eat-logo.png">
-<link rel="stylesheet" href="./style.css">
+<link rel="stylesheet" href="./style.css?v=pickup-code">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<script type="module" src="./app.js"></script>
+<script type="module" src="./app.js?v=pickup-code"></script>
+<style>.logo-image > * {display:none!important}</style>
 </head>
 <body>
 <header><div class="top">
-<a class="brand" href="#explore" aria-label="Swap Eat home"><span class="logo" style="background: center / contain no-repeat url(./swap-eat-logo.png)"></span>Swap<span class="green">Eat</span></a>
+<a class="brand" href="#explore" aria-label="Swap Eat home"><span class="logo logo-image" aria-hidden="true" style="background: center / contain no-repeat url(./swap-eat-logo.png)"></span>Swap<span class="green">Eat</span></a>
 <button class="location" id="location"></button>
 <nav id="desktop" aria-label="Main navigation"></nav>
 <button id="account" class="secondary"></button>
