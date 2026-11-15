@@ -32,17 +32,47 @@ let listings=[], requests=[], user=null, view='', area='All Bhopal', category='A
 const bhopal={lat:23.2599,lng:77.4126};
 let profile=null;
 let position, watchId, marketMap, mapPins, radius, userMarker, showMap=false, picker, pickupPin;
+let detectedCity='Unavailable';
+const supportedCities=[
+  ['Bhopal',23.2599,77.4126,23],['Indore',22.7196,75.8577,24],
+  ['Ujjain',23.1765,75.7885,12],['Dewas',22.9676,76.0534,10],
+  ['Sehore',23.2032,77.0844,9],['Vidisha',23.5251,77.8081,11],
+  ['Jabalpur',23.1815,79.9864,18],['Gwalior',26.2183,78.1828,18],
+  ['Khandwa',21.8257,76.3526,12],['Ratlam',23.3315,75.0367,12],
+  ['Sagar',23.8388,78.7378,13],['Rewa',24.5373,81.3042,13],
+  ['Satna',24.6005,80.8322,12],['Narmadapuram',22.7441,77.7369,10]
+];
+function cityForPosition(point){
+  let nearest=Infinity;
+  let city='Unavailable';
+  for(const [name,lat,lng,range] of supportedCities){
+    const km=distance(point,{lat,lng});
+    if(km<=range && km<nearest){
+      nearest=km;
+      city=name;
+    }
+  }
+  return city;
+}
+function updateCity(){
+  $('location').innerHTML=icon('pin')+escape(detectedCity)+icon('chevron');
+  if($('landing-city'))$('landing-city').textContent=detectedCity;
+}
 function locate(){
   if(watchId!==undefined)return;
   if(!navigator.geolocation){toast('Location is unavailable on this device.');return;}
   watchId=navigator.geolocation.watchPosition(({coords})=>{
     const first=!position;
     position={lat:coords.latitude,lng:coords.longitude};
+    detectedCity=cityForPosition(position);
     if(first && marketMap)marketMap.setView([position.lat,position.lng],13);
     render();
   },()=>{
     navigator.geolocation.clearWatch(watchId);
     watchId=undefined;
+    position=null;
+    detectedCity='Unavailable';
+    render();
     toast('Location could not be read. Check browser permissions.');
   },{enableHighAccuracy:true,maximumAge:15000,timeout:20000});
 }
@@ -66,14 +96,14 @@ function tabs(){
   const tabHtml=nav.map(([route,label,name])=>'<button data-route="'+route+'"'+(view===route?' aria-current="page"':'')+'>'+icon(name)+label+(route==='requests'&&pending?' ('+pending+')':'')+'</button>').join('');
   $('desktop').innerHTML=tabHtml;
   $('bottom').innerHTML=tabHtml+'<button data-action="post">'+icon('plus')+'List food</button>';
-  $('location').innerHTML=icon('pin')+escape(area==='All Bhopal'?'Bhopal':area)+icon('chevron');
+  updateCity();
   $('account').innerHTML=icon('user')+' '+(data.isDemo?'Demo':user?'Account':'Sign in');
 }
 function landing(){
   $('main').innerHTML=`
     <section class="landing-hero" aria-labelledby="landing-title">
       <div class="landing-intro">
-        <p class="landing-place">${icon('pin')} Bhopal’s food-sharing community</p>
+        <p class="landing-place">${icon('pin')} <span id="landing-city">${escape(detectedCity)}</span></p>
         <h1 id="landing-title">Good food.<br><em>Better shared.</em></h1>
         <p class="landing-copy">Find free shares, swaps and surplus food deals from neighbours and local businesses.</p>
         <div class="landing-actions">
@@ -371,7 +401,7 @@ document.addEventListener('click',async e=>{
   const d=btn.dataset;
   try{
     if(btn.id==='account') account();
-    if(btn.id==='location') form('Choose area','<label>Neighbourhood<select name="area">'+options(['All Bhopal',...areas],area)+'</select></label>','Apply',async values=>{area=values.area;dialog.close();go('explore');render();});
+    if(btn.id==='location') form('Choose area','<label>Neighbourhood<select name="area">'+options(['All Bhopal',...areas],area)+'</select></label>','Apply',async values=>{area=values.area;dialog.close();go('dashboard');render();},'<button type="button" class="secondary" data-action="detect-city">Check my location</button>');
     if(d.route){if(d.route==='requests' && requests.some(r=>r.owner===user?.uid && r.status==='pending'))requestTab='received';go(d.route);}
     if(d.filter){category=d.filter;results();$('chips').querySelector('[aria-pressed=true]')?.focus();}
     if(d.tab){requestTab=d.tab;myRequests();loadMatchedPhones();}
@@ -388,6 +418,7 @@ document.addEventListener('click',async e=>{
     if(d.action==='demo'||d.action==='auth')account();
     if(d.action==='post')post();
     if(d.action==='browse')go('dashboard');
+    if(d.action==='detect-city'){dialog.close();locate();}
     if(d.action==='nearby'){
       if(position){navigator.geolocation.clearWatch(watchId);watchId=undefined;position=null;results();}
       else locate();
@@ -423,5 +454,6 @@ dialog.addEventListener('cancel',()=>{afterSignIn=null;});
 document.addEventListener('error',e=>{if(e.target instanceof HTMLImageElement)e.target.remove();},true);
 window.addEventListener('hashchange',navigate);
 navigate();
+navigator.permissions?.query({name:'geolocation'}).then(permission=>{if(permission.state==='granted')locate();}).catch(()=>{});
 data.start((l,r)=>{listings=l;requests=r;data.expireListings(l);render();},who=>{user=who;profile=null;if(who&&!data.isDemo)data.getProfile().then(p=>{if(user?.uid===who.uid)profile=p;}).catch(err=>toast(fail(err)));render();},err=>toast(fail(err)));
 setInterval(()=>{data.expireListings(listings);if(!dialog.open)render();},15000);
